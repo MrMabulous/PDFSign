@@ -61,7 +61,7 @@ namespace pdfsign
         //
         // the actual LTV enabling methods
         //
-        void addLtvForChain(X509Certificate certificate, IOcspClient ocspClient, ICrlClient crlClient, PdfName key)
+        public void addLtvForChain(X509Certificate certificate, IOcspClient ocspClient, ICrlClient crlClient, PdfName key)
         {
             if (seenCertificates.Contains(certificate))
                 return;
@@ -70,9 +70,10 @@ namespace pdfsign
 
             while (certificate != null)
             {
+                byte[] encoded = certificate.GetEncoded();
                 Console.WriteLine(certificate.SubjectDN);
                 X509Certificate issuer = getIssuerCertificate(certificate);
-                validationData.certs.Add(certificate.GetEncoded());
+                validationData.certs.Add(encoded);
                 byte[] ocspResponse = ocspClient.GetEncoded(certificate, issuer, null);
                 if (ocspResponse != null)
                 {
@@ -90,21 +91,21 @@ namespace pdfsign
                     ICollection<byte[]> crl = crlClient.GetEncoded(certificate, null);
                     if (crl != null && crl.Count > 0)
                     {
-                        Console.WriteLine("  with {0} CRLs\n", crl.Count);
+                        Console.WriteLine("  with {0} CRLs", crl.Count);
                         foreach (byte[] crlBytes in crl)
                         {
                             validationData.crls.Add(crlBytes);
                             addLtvForChain(null, ocspClient, crlClient, getCrlHashKey(crlBytes));
                         }
+                        Console.WriteLine();
                     }
                 }
                 certificate = issuer;
             }
-
             validated[key] = validationData;
         }
 
-        void outputDss()
+        public void outputDss()
         {
             PdfWriter writer = pdfStamper.Writer;
             PdfReader reader = pdfStamper.Reader;
@@ -114,6 +115,8 @@ namespace pdfsign
             PdfArray ocsps = new PdfArray();
             PdfArray crls = new PdfArray();
             PdfArray certs = new PdfArray();
+
+            Dictionary<PdfName, PdfIndirectObject> embeddedObjects = new Dictionary<PdfName, PdfIndirectObject>();
 
             writer.AddDeveloperExtension(PdfDeveloperExtension.ESIC_1_7_EXTENSIONLEVEL5);
             writer.AddDeveloperExtension(new PdfDeveloperExtension(PdfName.ADBE, new PdfName("1.7"), 8));
@@ -128,27 +131,51 @@ namespace pdfsign
                 PdfDictionary vri = new PdfDictionary();
                 foreach (byte[] b in validated[vkey].crls)
                 {
-                    PdfStream ps = new PdfStream(b);
-                    ps.FlateCompress();
-                    PdfIndirectReference iref = writer.AddToBody(ps, false).IndirectReference;
-                    crl.Add(iref);
-                    crls.Add(iref);
+                    PdfName hash = getSha256(b);
+                    if(embeddedObjects.TryGetValue(hash, out PdfIndirectObject obj))
+                    {
+                       crl.Add(obj.IndirectReference);
+                    } else {
+                        PdfStream ps = new PdfStream(b);
+                        ps.FlateCompress();
+                        PdfIndirectObject newObj = writer.AddToBody(ps, false);
+                        embeddedObjects[hash] = newObj;
+                        PdfIndirectReference iref = newObj.IndirectReference;
+                        crl.Add(iref);
+                        crls.Add(iref);
+                    }
                 }
                 foreach (byte[] b in validated[vkey].ocsps)
                 {
-                    PdfStream ps = new PdfStream(buildOCSPResponse(b));
-                    ps.FlateCompress();
-                    PdfIndirectReference iref = writer.AddToBody(ps, false).IndirectReference;
-                    ocsp.Add(iref);
-                    ocsps.Add(iref);
+                    PdfName hash = getSha256(b);
+                    if(embeddedObjects.TryGetValue(hash, out PdfIndirectObject obj))
+                    {
+                       crl.Add(obj.IndirectReference);
+                    } else {
+                        PdfStream ps = new PdfStream(buildOCSPResponse(b));
+                        ps.FlateCompress();
+                        PdfIndirectObject newObj = writer.AddToBody(ps, false);
+                        embeddedObjects[hash] = newObj;
+                        PdfIndirectReference iref = newObj.IndirectReference;
+                        ocsp.Add(iref);
+                        ocsps.Add(iref);
+                    }
                 }
                 foreach (byte[] b in validated[vkey].certs)
                 {
-                    PdfStream ps = new PdfStream(b);
-                    ps.FlateCompress();
-                    PdfIndirectReference iref = writer.AddToBody(ps, false).IndirectReference;
-                    cert.Add(iref);
-                    certs.Add(iref);
+                    PdfName hash = getSha256(b);
+                    if(embeddedObjects.TryGetValue(hash, out PdfIndirectObject obj))
+                    {
+                       cert.Add(obj.IndirectReference);
+                    } else {
+                        PdfStream ps = new PdfStream(b);
+                        ps.FlateCompress();
+                        PdfIndirectObject newObj = writer.AddToBody(ps, false);
+                        embeddedObjects[hash] = newObj;
+                        PdfIndirectReference iref = newObj.IndirectReference;
+                        cert.Add(iref);
+                        certs.Add(iref);
+                    }
                 }
                 if (ocsp.Length > 0)
                     vri.Put(PdfName.OCSP, writer.AddToBody(ocsp, false).IndirectReference);
@@ -213,6 +240,18 @@ namespace pdfsign
         static byte[] hashBytesSha1(byte[] b)
         {
             SHA1 sha = new SHA1CryptoServiceProvider();
+            return sha.ComputeHash(b);
+        }
+
+        static PdfName getSha256(byte[] b)
+        {
+            byte[] sha256 = hashBytesSha256(b);
+            return new PdfName(Utilities.ConvertToHex(sha256));
+        }
+
+        static byte[] hashBytesSha256(byte[] b)
+        {
+            SHA256 sha = new SHA256CryptoServiceProvider();
             return sha.ComputeHash(b);
         }
 
