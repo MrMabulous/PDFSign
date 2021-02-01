@@ -6,7 +6,7 @@ a certificate from the windows store or using a PKCS11 compatible hardware token
 This is a command line tool that allows signing and/or timestamping of pdf files using certificates.
 The actual PDF manipulation is performed using the itextsharp library v5.5.
 This is a fork of (https://github.com/IcoDeveloper/PDFSign) with some added features and bug fixes
-(hardware token support, LTV, certification, TSA authentication).
+(hardware token support, LTV, certification, TSA authentication, document timestamps).
 This tool was originaly published by Martin Bene on [codeplex](https://archive.codeplex.com/?p=pdfsign)
 
 
@@ -37,7 +37,7 @@ token, which will actually timestamp the document. This way Adobe Reader will re
 
 ## usage
 ```
-pdfsign v1.5.0, (c) 2021 Mabulous GmbH
+pdfsign v1.6.0, (c) 2021 Mabulous GmbH
 powered by:
 pdfsign v1.3.0, (c) 2019 icomedias GmbH
 iTextSharp 5.5 Copyright (C) 1999-2018 by iText Group NV
@@ -95,8 +95,9 @@ Options:
       --voffset=VALUE        Vertical offset of signatures, default 5
       --cols=VALUE           Number of signature columns, default 1
   -v, --verbose              Enable log output, on: -v+, off: -v-, default on
-  -m, --multi                Allow multiple signatures, on: -m+, off: -m-,
-                               default on
+  -m, --multi                Opens document in 'Append mode', leaving existing
+                               signatures untouched, on: -m+, off: -m-, default
+                               on
   -h, -?, --help             Show this help message and exit
 Return Values:
          0: Success
