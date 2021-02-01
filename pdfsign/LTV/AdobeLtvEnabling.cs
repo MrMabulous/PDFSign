@@ -4,9 +4,14 @@ using iTextSharp.text.pdf;
 using iTextSharp.text.pdf.security;
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Ocsp;
+using Org.BouncyCastle.Asn1.Cms;
 using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Tsp;
 using Org.BouncyCastle.Ocsp;
 using Org.BouncyCastle.X509;
+using Org.BouncyCastle.X509.Store;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -103,6 +108,32 @@ namespace pdfsign
                 certificate = issuer;
             }
             validated[key] = validationData;
+        }
+
+        // Returns TSA signature certificate
+        public X509Certificate addLtvForTsa(ITSAClient tsaClient, IOcspClient ocspClient)
+        {
+            IDigest messageDigest = tsaClient.GetMessageDigest();
+            byte[] tsImprint = new byte[messageDigest.GetDigestSize()];
+            messageDigest.DoFinal(tsImprint, 0);
+            byte[] tsToken;
+            try {
+        	    tsToken = tsaClient.GetTimeStampToken(tsImprint);
+            } catch(Exception e) {
+        	    throw new GeneralSecurityException(e.Message);
+            }
+
+            Asn1Sequence asn1Seq = Asn1Sequence.GetInstance(tsToken);
+            ContentInfo sigData = ContentInfo.GetInstance(asn1Seq);
+            TimeStampToken token = new TimeStampToken(sigData);
+            IX509Store tokenCerts = token.GetCertificates("COLLECTION");
+            List<X509Certificate> signingCerts = new List<X509Certificate>();
+            foreach(X509Certificate cert in tokenCerts.GetMatches(token.SignerID)) {
+                signingCerts.Add(cert);
+            }
+            ICrlClient crlClient = new CrlClientOnline(signingCerts);
+            addLtvForChain(signingCerts[0], ocspClient, crlClient, getContentInfoHashKey(sigData));
+            return signingCerts[0];
         }
 
         public void outputDss()
@@ -214,6 +245,16 @@ namespace pdfsign
         {
             BasicOcspResponse basicResponse = BasicOcspResponse.GetInstance(Asn1Sequence.GetInstance(basicResponseBytes));
             byte[] signatureBytes = basicResponse.Signature.GetBytes();
+            DerOctetString octetString = new DerOctetString(signatureBytes);
+            byte[] octetBytes = octetString.GetEncoded();
+            byte[] octetHash = hashBytesSha1(octetBytes);
+            PdfName octetName = new PdfName(Utilities.ConvertToHex(octetHash));
+            return octetName;
+        }
+
+        static PdfName getContentInfoHashKey(ContentInfo info)
+        {
+            byte[] signatureBytes = info.GetDerEncoded();
             DerOctetString octetString = new DerOctetString(signatureBytes);
             byte[] octetBytes = octetString.GetEncoded();
             byte[] octetHash = hashBytesSha1(octetBytes);

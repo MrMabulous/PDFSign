@@ -3,10 +3,10 @@ Basic command line tool for signing and certifying PDF Files using a PKCS12 cert
 a certificate from the windows store or using a PKCS11 compatible hardware token.
 
 ## Notes
-This is a command line tool that allows signing of pdf files using certificates.
-the actual PDF manipulation is performed using the itextsharp library v5.5
+This is a command line tool that allows signing and/or timestamping of pdf files using certificates.
+The actual PDF manipulation is performed using the itextsharp library v5.5.
 This is a fork of (https://github.com/IcoDeveloper/PDFSign) with some added features and bug fixes
-(hardware token support, LTV, certification, TSA authentication)
+(hardware token support, LTV, certification, TSA authentication).
 This tool was originaly published by Martin Bene on [codeplex](https://archive.codeplex.com/?p=pdfsign)
 
 
@@ -20,6 +20,9 @@ In order to use a certificate from the windows store, the certificate must
 In order to use a hardware token, the token must support PKCS11 and the path to the driver DLL
 implementing the PKCS11 api must be provided.
 For example, for SafeNet eToken this would be C:\Windows\System32\eTPKCS11.dll
+
+It's also possible to only timestamp the document using a trusted timestamping service (TSA)
+without signing it (for this, simply don't provide any certificate but do provide a tsa url).
   
 In Addition to nuget packages, the build process uses Microsofts [ILMerge](http://www.microsoft.com/download/en/details.aspx?displaylang=en&id=17630) 
 tool to produce a consolidated single binary including all dlls. 
@@ -28,6 +31,9 @@ LTV (long term validation) is enabled by default. This embeds the certificate-ch
 and OSCP replies into the document so that the signature remains verifiable also beyond the validity of the
 signing certificate. This can significantly increase filesize however if certificates in the chain don't use
 OSCP and instead reference large CRL files. LTV can be disabled with -ltv-
+NOTE: If a TSA URL is provided and LTV is enabled, the programm will request two timestamp tokens from the TSA.
+The first one is only used to extract the trust chain of the token, which is needed to enable LTV for the second
+token, which will actually timestamp the document. This way Adobe Reader will recognize the Timestamp as LTV enabled.
 
 ## usage
 ```

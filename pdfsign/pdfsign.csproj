@@ -76,6 +76,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="LTV\AdobeLtvEnabling.cs" />
+    <Compile Include="LTV\LtvTimestampHidden.cs" />
     <Compile Include="pdfsign.cs">
       <SubType>Code</SubType>
     </Compile>
