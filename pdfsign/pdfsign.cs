@@ -175,9 +175,13 @@ namespace pdfsign
                 if (!String.IsNullOrEmpty(backpage) && !File.Exists(backpage))
                     throw new OptionException("backpage file {0} does not exist", backpage);
 
-                if(pkcs11_library_path != null && certfile != null && thumbprint != null)
+                int cert_methods = (pkcs11_library_path != null ? 1:0) + (certfile != null ? 1:0) + (thumbprint != null ? 1:0);
+                if(cert_methods > 1)
                 {
                     throw new OptionException("must use only one of {0}", "pkcs11lib, thumbprint, certfile");
+                } else if (cert_methods == 0 && tsa_url == null)
+                {
+                    throw new OptionException("If you don't provide a certificate, you must provide a {0}", "tsa");
                 }
 
                 use_pkcs11 = (pkcs11_library_path != null);
