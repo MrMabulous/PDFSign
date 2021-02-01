@@ -35,7 +35,7 @@ namespace pdfsign
     {
         static void ShowHelp(OptionSet p)
         {
-            Console.WriteLine("pdfsign v1.5.0, (c) 2021 Mabulous GmbH");
+            Console.WriteLine("pdfsign v1.6.0, (c) 2021 Mabulous GmbH");
             Console.WriteLine("powered by:");
             Console.WriteLine("pdfsign v1.3.0, (c) 2019 icomedias GmbH");
             Console.WriteLine("iTextSharp 5.5 Copyright (C) 1999-2018 by iText Group NV");
@@ -98,7 +98,7 @@ namespace pdfsign
             string template = null;
             string dateformat = "G"; 
             string password = null;
-            string reason = "proof of authenticity";
+            string reason = null;
             string location = null;
             string contact = null;
             bool show_signature = true;
@@ -107,6 +107,7 @@ namespace pdfsign
             bool use_ltv = true;
             bool show_help = false;
             bool verbose = true;
+            bool timestamp_only = false;
 
             Retvals retval;
 
@@ -142,7 +143,7 @@ namespace pdfsign
                 { "voffset=", "Vertical offset of signatures, default 5", (int v) => voffset=v},
                 { "cols=","Number of signature columns, default 1", (int v) => cols = v},
                 { "v|verbose", "Enable log output, on: -v+, off: -v-, default on", v => verbose = v != null },
-                { "m|multi", "Allow multiple signatures, on: -m+, off: -m-, default on", v => multi_signature = v != null },
+                { "m|multi", "Opens document in 'Append mode', leaving existing signatures untouched, on: -m+, off: -m-, default on", v => multi_signature = v != null },
                 { "h|?|help", "Show this help message and exit", v => show_help = v != null },
             };
 
@@ -175,9 +176,27 @@ namespace pdfsign
                 if (!String.IsNullOrEmpty(backpage) && !File.Exists(backpage))
                     throw new OptionException("backpage file {0} does not exist", backpage);
 
-                if(pkcs11_library_path != null && certfile != null && thumbprint != null)
+                int cert_methods = (String.IsNullOrEmpty(pkcs11_library_path) ? 0 : 1) +
+                                   (String.IsNullOrEmpty(certfile) ? 0 : 1) +
+                                   (String.IsNullOrEmpty(thumbprint) ? 0 : 1);
+                if(cert_methods > 1)
                 {
                     throw new OptionException("must use only one of {0}", "pkcs11lib, thumbprint, certfile");
+                } 
+                if (cert_methods == 0)
+                {
+                    if(tsa_url == null)
+                        throw new OptionException("If you don't provide a certificate, you must provide a {0}", "tsa");
+                    else
+                        timestamp_only = true;
+                }
+
+                if(reason == null)
+                {
+                    if(timestamp_only)
+                        reason = "Timestamping";
+                    else
+                        reason = "Proof of authenticity";
                 }
 
                 use_pkcs11 = (pkcs11_library_path != null);
@@ -187,17 +206,12 @@ namespace pdfsign
                         throw new OptionException("PKCS11 library {0} does not exist", pkcs11_library_path);
                     if (password == null)
                         throw new OptionException("required parameter {0} missing", "password");
-                } else
+                } else if (!String.IsNullOrEmpty(thumbprint))
                 {
-                    if (String.IsNullOrEmpty(thumbprint))
-                    {
-                        if (certfile == null)
-                            throw new OptionException("required parameter {0} missing", "certfile");
-
-                        if (password == null)
-                            throw new OptionException("required parameter {0} missing", "password");
-                    }
+                    if (password == null)
+                        throw new OptionException("required parameter {0} missing", "password");
                 }
+
                 if (!File.Exists(infile))
                     throw new OptionException("input file {0} does not exist", infile);
 
@@ -229,9 +243,9 @@ namespace pdfsign
 
             try
             {
-                List<X509Certificate> extra_certs;
-                X509Certificate signing_cert;
-                IExternalSignature signature;
+                List<X509Certificate> extra_certs = new List<X509Certificate>();;
+                X509Certificate signing_cert = null;
+                IExternalSignature signature = null;
 
                 if(use_pkcs11)
                 {
@@ -360,14 +374,13 @@ namespace pdfsign
                         HashAlgorithm hashAlgorithm = HashAlgorithm.SHA256;
                         Pkcs11RsaSignature pkcs11_signature = new Pkcs11RsaSignature(pkcs11_library_path, token_serial, null, password, null, cert_id, hashAlgorithm);
                         signing_cert = CertUtils.ToBouncyCastleObject(pkcs11_signature.GetSigningCertificate());
-                        extra_certs = new List<X509Certificate>();
                         foreach(byte[] other_cert in pkcs11_signature.GetAllCertificates())
                         {
                             extra_certs.Add(CertUtils.ToBouncyCastleObject(other_cert));
                         }
                         signature = pkcs11_signature;
                     }
-                } else // don't use pkcs11 token
+                } else if(!String.IsNullOrEmpty(thumbprint) || !String.IsNullOrEmpty(certfile)) // use certificate file
                 {
                     retval = Retvals.ERR_CERT; // Error processing certificate file
                     Stream fs = null; 
@@ -422,7 +435,6 @@ namespace pdfsign
                     retval = Retvals.ERR_CHAIN; // Error extracting certificate chain
                     signing_cert = ks.GetCertificate(alias).Certificate;
                     X509CertificateEntry[] chainEntries = ks.GetCertificateChain(alias);
-                    extra_certs = new List<X509Certificate>();
                     foreach(X509CertificateEntry entry in chainEntries)
                     {
                         extra_certs.Add(entry.Certificate);
@@ -462,10 +474,21 @@ namespace pdfsign
                 sap.Acro6Layers = !show_validity;
                 sap.CertificationLevel = certification_level;
 
+                TSAClientBouncyCastle tsaClient = null;
+                if (!string.IsNullOrEmpty(tsa_url))
+                {
+                    if(tsa_user != null && tsa_pass != null)
+                        tsaClient = new TSAClientBouncyCastle(tsa_url, tsa_user, tsa_pass);
+                    else
+                        tsaClient = new TSAClientBouncyCastle(tsa_url);
+                }
+
                 // when using visible signatures: find an unused field name for the signature
                 if (show_signature)
                 {
                     string basename = "Signature";
+                    if(timestamp_only)
+                        basename = "Timestamp";
                     AcroFields form = reader.AcroFields;
                     int cnt = -1;
                     string name;
@@ -485,7 +508,9 @@ namespace pdfsign
                     if (!String.IsNullOrEmpty(template))
                     {
                         template = template.Replace("\\n", "\n");
-                        string subject = signing_cert.SubjectDN.GetValueList(new Org.BouncyCastle.Asn1.DerObjectIdentifier("2.5.4.3"))[0].ToString();
+                        string subject = null;
+                        if(signing_cert!=null)
+                            subject = signing_cert.SubjectDN.GetValueList(new Org.BouncyCastle.Asn1.DerObjectIdentifier("2.5.4.3"))[0].ToString();
                         string date = sap.SignDate.ToString(dateformat);
                         template = template.Replace("[name]", subject);
                         template = template.Replace("[date]", date);
@@ -495,34 +520,36 @@ namespace pdfsign
                     sap.SetVisibleSignature(new Rectangle(xoff, yoff, xoff + width, yoff + height), pageno, name);
                 }
 
-                TSAClientBouncyCastle tsaClient = null;
-                if (!string.IsNullOrEmpty(tsa_url))
-                {
-                    if(tsa_user != null && tsa_pass != null)
-                        tsaClient = new TSAClientBouncyCastle(tsa_url, tsa_user, tsa_pass);
-                    else
-                        tsaClient = new TSAClientBouncyCastle(tsa_url);
-                }
-
                 if(use_ltv) {
                     AdobeLtvEnabling adobeLtvEnabling = new AdobeLtvEnabling(stp);
                     OcspVerifier verifier = new OcspVerifier(null, null);
                     IOcspClient oscpClient = new OcspClientBouncyCastle(verifier);
-                    extra_certs.Add(signing_cert);
-                    AdobeLtvEnabling.extraCertificates = extra_certs;
-                    ICrlClient crlClient = new CrlClientOnline(extra_certs);
-                    adobeLtvEnabling.addLtvForChain(signing_cert, oscpClient, crlClient, PdfName.A);
+                    X509Certificate tsaCert = adobeLtvEnabling.addLtvForTsa(tsaClient, oscpClient);
+                    if(!timestamp_only) {
+                        extra_certs.Add(signing_cert);
+                        AdobeLtvEnabling.extraCertificates = extra_certs;
+                        ICrlClient crlClient = new CrlClientOnline(extra_certs);
+                        adobeLtvEnabling.addLtvForChain(signing_cert, oscpClient, crlClient, PdfName.A);
+                    } else
+                    {
+                        sap.Certificate = tsaCert;
+                    }
                     adobeLtvEnabling.outputDss();
                 }
 
-                MakeSignature.SignDetached(sap,
-                                           signature,
-                                           new X509Certificate[]{ signing_cert },
-                                           null,
-                                           null,
-                                           tsaClient,
-                                           0,
-                                           CryptoStandard.CADES);
+                if(timestamp_only) {
+                    LtvTimestampHidden.Timestamp(sap, tsaClient, sap.FieldName);
+                } else
+                {
+                    MakeSignature.SignDetached(sap,
+                                               signature,
+                                               new X509Certificate[]{ signing_cert },
+                                               null,
+                                               null,
+                                               tsaClient,
+                                               0,
+                                               CryptoStandard.CADES);
+                }
 
                 stp.Close();
             }
@@ -530,6 +557,8 @@ namespace pdfsign
             {
                 Console.Write("pdfsign: ");
                 Console.WriteLine(e.Message);
+                Console.WriteLine();
+                Console.WriteLine(e.StackTrace);
                 return (int)retval;
             }
 
