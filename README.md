@@ -37,7 +37,7 @@ token, which will actually timestamp the document. This way Adobe Reader will re
 
 ## usage
 ```
-pdfsign v1.6.0, (c) 2021 Mabulous GmbH
+pdfsign v1.6.1, (c) 2021 Mabulous GmbH
 powered by:
 pdfsign v1.3.0, (c) 2019 icomedias GmbH
 iTextSharp 5.5 Copyright (C) 1999-2018 by iText Group NV
