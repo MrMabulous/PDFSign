@@ -35,7 +35,7 @@ namespace pdfsign
     {
         static void ShowHelp(OptionSet p)
         {
-            Console.WriteLine("pdfsign v1.6.0, (c) 2021 Mabulous GmbH");
+            Console.WriteLine("pdfsign v1.6.1, (c) 2021 Mabulous GmbH");
             Console.WriteLine("powered by:");
             Console.WriteLine("pdfsign v1.3.0, (c) 2019 icomedias GmbH");
             Console.WriteLine("iTextSharp 5.5 Copyright (C) 1999-2018 by iText Group NV");
@@ -133,7 +133,7 @@ namespace pdfsign
                 { "tsa=", "URL of rfc3161 TSA (Time Stamping Authority)", v => tsa_url = v },
                 { "tsauser=", "If selected TSA server requires credentials, enter username (optional)", v => tsa_user = v },
                 { "tsapass=", "If selected TSA server requires credentials, enter password (optional)", v => tsa_user = v },
-                { "ltv", "Enables Long Term Validation, on: -ltv+, off: -ltv-, default on", v => use_ltv = v != null },
+                { "ltv", "Enables Long Term Validation, on: -ltv+, off: -ltv-, only takes effect if tsa is defined, default on", v => use_ltv = v != null },
                 { "certlevel=", "Certification Level. 0: Not certified, 1: No changes allowed, 2: Only Allow Form-Filling, 3: Only Allow Form-Filling & Annotations, default 0", (int v) => certification_level = v},
                 { "width=", "Signature width, default 180", (int v) => width = v},
                 { "height=", "Signature height, default 80", (int v) => height = v},
@@ -228,6 +228,9 @@ namespace pdfsign
 
                 if(certification_level > 3 || certification_level < 0)
                     throw new OptionException("invalid value for parameter {0}, must be 0-3", "certlevel");
+
+                if(string.IsNullOrEmpty(tsa_url))
+                    use_ltv = false;
 
                 if((tsa_user != null && tsa_pass == null) || (tsa_user == null && tsa_pass != null))
                     throw new OptionException("To use TSA authentication both {0} must be specified", "tsauser and tsapass");
@@ -535,6 +538,18 @@ namespace pdfsign
                         sap.Certificate = tsaCert;
                     }
                     adobeLtvEnabling.outputDss();
+                } else if(tsaClient != null)
+                {
+                    // Request a dummy token in any case so that size estimate for actual token will be correct.
+                    IDigest messageDigest = tsaClient.GetMessageDigest();
+                    byte[] tsImprint = new byte[messageDigest.GetDigestSize()];
+                    messageDigest.DoFinal(tsImprint, 0);
+                    byte[] tsToken;
+                    try {
+        	               tsToken = tsaClient.GetTimeStampToken(tsImprint);
+                    } catch(Exception e) {
+        	            throw new InvalidOperationException("Failed to request dummy TSA token: "+ e.Message);
+                    }
                 }
 
                 if(timestamp_only) {
